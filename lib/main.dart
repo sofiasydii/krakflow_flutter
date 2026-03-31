@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'task_repository.dart';
 
 void main() {
   runApp(const MyApp());
@@ -7,81 +8,79 @@ void main() {
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  final List<Task> tasks = const [
-    Task(
-        title: "Zrobić projekt Flutter",
-        deadline: "jutro",
-        done: false,
-        priority: "wysoki"),
-    Task(
-        title: "Oddać zadanie z AI",
-        deadline: "dzisiaj",
-        done: true,
-        priority: "wysoki"),
-    Task(
-        title: "Posprzątać pokój",
-        deadline: "w piątek",
-        done: false,
-        priority: "średni"),
-    Task(
-        title: "Przeczytać notatki",
-        deadline: "weekend",
-        done: true,
-        priority: "niski"),
-  ];
+  @override
+  Widget build(BuildContext context) {
+    return const MaterialApp(
+      home: MyMainHomeScreen(),
+    );
+  }
+}
+
+class MyMainHomeScreen extends StatefulWidget {
+  const MyMainHomeScreen({super.key});
+
+  @override
+  State<MyMainHomeScreen> createState() => _MyMainHomeScreenState();
+}
+
+class _MyMainHomeScreenState extends State<MyMainHomeScreen> {
+
 
   @override
   Widget build(BuildContext context) {
-    int doneCount = tasks.where((task) => task.done).length;
+    int doneCount = TaskRepository.tasks.where((task) => task.done).length;
 
-    return MaterialApp(
-      home: Scaffold(
-        appBar: AppBar(
-          title: const Text("KrakFlow"),
-        ),
-        body: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text("Masz dziś ${tasks.length} zadania ($doneCount wykonane)"),
-              const SizedBox(height: 16),
-              const Text(
-                "Dzisiejsze zadania",
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                ),
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("KrakFlow"),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text("Masz dziś ${TaskRepository.tasks.length} zadania ($doneCount wykonane)"),
+            const SizedBox(height: 16),
+            const Text(
+              "Dzisiejsze zadania",
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
               ),
-              const SizedBox(height: 16),
-              Expanded(
-                child: ListView(
-                  children: tasks
-                      .map((task) => TaskCard(task: task))
-                      .toList(),
-                ),
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: ListView(
+                children: TaskRepository.tasks
+                    .map((task) => TaskCard(task: task))
+                    .toList(),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed:() async {
+          final Task? newTask = await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const AddTaskScreen(),
+            ),
+          );
+
+          if (newTask != null) {
+            setState(() {
+              TaskRepository.tasks.add(newTask);
+            });
+          }
+        },
+        child: const Icon(Icons.add),
       ),
     );
   }
 }
 
-class Task {
-  final String title;
-  final String deadline;
-  final bool done;
-  final String priority;
 
-  const Task({
-    required this.title,
-    required this.deadline,
-    required this.done,
-    required this.priority,
-  });
-}
 
 class TaskCard extends StatelessWidget {
   final Task task;
@@ -101,6 +100,72 @@ class TaskCard extends StatelessWidget {
         title: Text(task.title),
         subtitle: Text(
           "termin: ${task.deadline} | priorytet: ${task.priority}",
+        ),
+      ),
+    );
+  }
+}
+
+
+class AddTaskScreen extends StatelessWidget {
+  AddTaskScreen({super.key});
+
+  final TextEditingController titleController = TextEditingController();
+  final TextEditingController deadlineController = TextEditingController();
+  final TextEditingController priorityController = TextEditingController();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("Nowe zadanie"),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: titleController,
+              decoration: const InputDecoration(
+                labelText: "Tytuł zadania",
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            TextField(
+              controller: deadlineController,
+              decoration: const InputDecoration(
+                labelText: "Termin",
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            TextField(
+              controller: priorityController,
+              decoration: const InputDecoration(
+                labelText: "Priorytet (wysoki/średni/niski)",
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            ElevatedButton(
+              onPressed: () {
+                final newTask = Task(
+                  title: titleController.text,
+                  deadline: deadlineController.text,
+                  done: false,
+                  priority: priorityController.text,
+                );
+
+                Navigator.pop(context, newTask);
+              },
+              child: const Text("Zapisz"),
+            ),
+          ],
         ),
       ),
     );
