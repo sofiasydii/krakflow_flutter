@@ -1,8 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:hive_ce_flutter/hive_flutter.dart';
+
 import 'task_repository.dart';
 import 'task_api_service.dart';
+import 'task_local_database.dart';
+import 'task_sync_service.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await Hive.initFlutter();
+  await Hive.openBox("tasks");
+
   runApp(const MyApp());
 }
 
@@ -12,6 +21,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const MaterialApp(
+      debugShowCheckedModeBanner: false,
       home: MyMainHomeScreen(),
     );
   }
@@ -25,20 +35,26 @@ class MyMainHomeScreen extends StatefulWidget {
 }
 
 class _MyMainHomeScreenState extends State<MyMainHomeScreen> {
-  String selectedFilter = "wszystkie";
+  String selectedFilter = "wszystki";
 
   late Future<List<Task>> _tasksFuture;
 
   @override
   void initState() {
     super.initState();
-    _tasksFuture = TaskApiService.fetchTasks();
+    _tasksFuture = loadTasks();
   }
 
-  void _reload() {
+  Future<List<Task>> loadTasks() async {
+    await TaskSyncService.loadInitialDataIfNeeded();
+    return TaskLocalDatabase.getTasks();
+  }
+
+  Future<void> _reload() async {
+    await TaskLocalDatabase.deleteAllTasks();
+
     setState(() {
-      TaskRepository.tasks.clear();
-      _tasksFuture = TaskApiService.fetchTasks();
+      _tasksFuture = loadTasks();
     });
   }
 
@@ -50,15 +66,11 @@ class _MyMainHomeScreenState extends State<MyMainHomeScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            tooltip: "Odśwież z API",
             onPressed: _reload,
           ),
           IconButton(
             icon: const Icon(Icons.delete),
-            tooltip: "Usuń wszystkie",
-            onPressed: TaskRepository.tasks.isEmpty
-                ? null
-                : () {
+            onPressed: () {
               showDialog(
                 context: context,
                 builder: (context) => AlertDialog(
@@ -70,14 +82,19 @@ class _MyMainHomeScreenState extends State<MyMainHomeScreen> {
                       child: const Text("Anuluj"),
                     ),
                     TextButton(
-                      onPressed: () {
+                      onPressed: () async {
+                        await TaskLocalDatabase.deleteAllTasks();
+
                         setState(() {
-                          TaskRepository.tasks.clear();
+                          _tasksFuture = loadTasks();
                         });
+
                         Navigator.pop(context);
+
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
-                              content: Text("Wszystkie zadania usunięte")),
+                            content: Text("Wszystkie zadania usunięte"),
+                          ),
                         );
                       },
                       child: const Text("Usuń"),
@@ -89,62 +106,28 @@ class _MyMainHomeScreenState extends State<MyMainHomeScreen> {
           ),
         ],
       ),
-
-      //   waiting → loader
-      //   error   → komunikat błędu
-      //   data    → lista zadań
       body: FutureBuilder<List<Task>>(
         future: _tasksFuture,
         builder: (context, snapshot) {
-
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 16),
-                  Text("Pobieranie zadań z API..."),
-                ],
-              ),
+              child: CircularProgressIndicator(),
             );
           }
 
           if (snapshot.hasError) {
             return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.error_outline, size: 64, color: Colors.red),
-                  const SizedBox(height: 16),
-                  const Text(
-                    "Nie udało się pobrać zadań",
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    "Błąd: ${snapshot.error}",
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.grey),
-                  ),
-                  const SizedBox(height: 24),
-                  ElevatedButton.icon(
-                    onPressed: _reload,
-                    icon: const Icon(Icons.refresh),
-                    label: const Text("Spróbuj ponownie"),
-                  ),
-                ],
-              ),
+              child: Text("Błąd: ${snapshot.error}"),
             );
           }
 
-          if (TaskRepository.tasks.isEmpty && snapshot.data != null) {
-            TaskRepository.tasks = snapshot.data!;
-          }
+          TaskRepository.tasks = snapshot.data ?? [];
 
-          int doneCount = TaskRepository.tasks.where((t) => t.done).length;
+          int doneCount =
+              TaskRepository.tasks.where((t) => t.done).length;
 
           List<Task> filteredTasks = TaskRepository.tasks;
+
           if (selectedFilter == "wykonane") {
             filteredTasks =
                 TaskRepository.tasks.where((t) => t.done).toList();
@@ -159,11 +142,9 @@ class _MyMainHomeScreenState extends State<MyMainHomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  "Masz dziś ${TaskRepository.tasks.length} zadań ($doneCount wykonanych)",
+                  "Masz dziś ${TaskRepository.tasks.length} zadan ($doneCount wykonanych)",
                 ),
-
                 const SizedBox(height: 10),
-
                 Row(
                   children: [
                     filterButton("Wszystkie", "wszystkie"),
@@ -171,61 +152,71 @@ class _MyMainHomeScreenState extends State<MyMainHomeScreen> {
                     filterButton("Wykonane", "wykonane"),
                   ],
                 ),
-
                 const SizedBox(height: 16),
-
                 const Text(
                   "Dzisiejsze zadania",
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-
                 const SizedBox(height: 16),
-
                 Expanded(
-                  child: filteredTasks.isEmpty
-                      ? const Center(
-                    child: Text(
-                      "Brak zadań do wyświetlenia",
-                      style: TextStyle(color: Colors.grey, fontSize: 16),
-                    ),
-                  )
-                      : ListView.builder(
+                  child: ListView.builder(
                     itemCount: filteredTasks.length,
                     itemBuilder: (context, index) {
                       final task = filteredTasks[index];
 
                       return Dismissible(
-                        key: ValueKey(task.title),
-                        onDismissed: (_) {
+                        key: ValueKey(task.id),
+                        onDismissed: (_) async {
+                          await TaskLocalDatabase.deleteTask(task.id);
+
                           setState(() {
-                            TaskRepository.tasks.remove(task);
+                            _tasksFuture = loadTasks();
                           });
+
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
-                                content:
-                                Text("Usunięto: ${task.title}")),
+                              content:
+                              Text("Usunięto: ${task.title}"),
+                            ),
                           );
                         },
                         child: TaskCard(
                           task: task,
-                          onChanged: (value) {
+                          onChanged: (value) async {
+                            final updatedTask = Task(
+                              id: task.id,
+                              title: task.title,
+                              deadline: task.deadline,
+                              done: value ?? false,
+                              priority: task.priority,
+                            );
+
+                            await TaskLocalDatabase
+                                .updateTask(updatedTask);
+
                             setState(() {
-                              task.done = value!;
+                              _tasksFuture = loadTasks();
                             });
                           },
                           onTap: () async {
-                            final updatedTask = await Navigator.push(
+                            final updatedTask =
+                            await Navigator.push(
                               context,
                               MaterialPageRoute(
                                 builder: (context) =>
                                     EditTaskScreen(task: task),
                               ),
                             );
+
                             if (updatedTask != null) {
+                              await TaskLocalDatabase
+                                  .updateTask(updatedTask);
+
                               setState(() {
-                                int idx =
-                                TaskRepository.tasks.indexOf(task);
-                                TaskRepository.tasks[idx] = updatedTask;
+                                _tasksFuture = loadTasks();
                               });
                             }
                           },
@@ -239,16 +230,20 @@ class _MyMainHomeScreenState extends State<MyMainHomeScreen> {
           );
         },
       ),
-
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
           final Task? newTask = await Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => AddTaskScreen()),
+            MaterialPageRoute(
+              builder: (context) => AddTaskScreen(),
+            ),
           );
+
           if (newTask != null) {
+            await TaskLocalDatabase.addTask(newTask);
+
             setState(() {
-              TaskRepository.tasks.add(newTask);
+              _tasksFuture = loadTasks();
             });
           }
         },
@@ -259,6 +254,7 @@ class _MyMainHomeScreenState extends State<MyMainHomeScreen> {
 
   Widget filterButton(String text, String value) {
     final isActive = selectedFilter == value;
+
     return TextButton(
       onPressed: () {
         setState(() {
@@ -269,13 +265,13 @@ class _MyMainHomeScreenState extends State<MyMainHomeScreen> {
         text,
         style: TextStyle(
           color: isActive ? Colors.blue : Colors.grey,
-          fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+          fontWeight:
+          isActive ? FontWeight.bold : FontWeight.normal,
         ),
       ),
     );
   }
 }
-
 
 class TaskCard extends StatelessWidget {
   final Task task;
@@ -316,9 +312,11 @@ class TaskCard extends StatelessWidget {
         title: Text(
           task.title,
           style: TextStyle(
-            decoration:
-            task.done ? TextDecoration.lineThrough : TextDecoration.none,
-            color: task.done ? Colors.grey : Colors.black,
+            decoration: task.done
+                ? TextDecoration.lineThrough
+                : TextDecoration.none,
+            color:
+            task.done ? Colors.grey : Colors.black,
           ),
         ),
         subtitle: Text(
@@ -340,31 +338,45 @@ class AddTaskScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Nowe zadanie")),
+      appBar: AppBar(
+        title: const Text("Nowe zadanie"),
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
             TextField(
-                controller: titleController,
-                decoration: const InputDecoration(labelText: "Tytuł")),
+              controller: titleController,
+              decoration: const InputDecoration(
+                labelText: "Tytuł",
+              ),
+            ),
             const SizedBox(height: 10),
             TextField(
-                controller: deadlineController,
-                decoration: const InputDecoration(labelText: "Termin")),
+              controller: deadlineController,
+              decoration: const InputDecoration(
+                labelText: "Termin",
+              ),
+            ),
             const SizedBox(height: 10),
             TextField(
-                controller: priorityController,
-                decoration: const InputDecoration(labelText: "Priorytet")),
+              controller: priorityController,
+              decoration: const InputDecoration(
+                labelText: "Priorytet",
+              ),
+            ),
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed: () {
                 final task = Task(
+                  id: DateTime.now()
+                      .millisecondsSinceEpoch,
                   title: titleController.text,
                   deadline: deadlineController.text,
                   done: false,
                   priority: priorityController.text,
                 );
+
                 Navigator.pop(context, task);
               },
               child: const Text("Zapisz"),
@@ -378,7 +390,11 @@ class AddTaskScreen extends StatelessWidget {
 
 class EditTaskScreen extends StatelessWidget {
   final Task task;
-  EditTaskScreen({super.key, required this.task});
+
+  EditTaskScreen({
+    super.key,
+    required this.task,
+  });
 
   final titleController = TextEditingController();
   final deadlineController = TextEditingController();
@@ -391,29 +407,42 @@ class EditTaskScreen extends StatelessWidget {
     priorityController.text = task.priority;
 
     return Scaffold(
-      appBar: AppBar(title: const Text("Edytuj zadanie")),
+      appBar: AppBar(
+        title: const Text("Edytuj zadanie"),
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
             TextField(
-                controller: titleController,
-                decoration: const InputDecoration(labelText: "Tytuł")),
+              controller: titleController,
+              decoration: const InputDecoration(
+                labelText: "Tytuł",
+              ),
+            ),
             TextField(
-                controller: deadlineController,
-                decoration: const InputDecoration(labelText: "Termin")),
+              controller: deadlineController,
+              decoration: const InputDecoration(
+                labelText: "Termin",
+              ),
+            ),
             TextField(
-                controller: priorityController,
-                decoration: const InputDecoration(labelText: "Priorytet")),
+              controller: priorityController,
+              decoration: const InputDecoration(
+                labelText: "Priorytet",
+              ),
+            ),
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed: () {
                 final updated = Task(
+                  id: task.id,
                   title: titleController.text,
                   deadline: deadlineController.text,
                   done: task.done,
                   priority: priorityController.text,
                 );
+
                 Navigator.pop(context, updated);
               },
               child: const Text("Zapisz zmiany"),

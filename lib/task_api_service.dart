@@ -16,29 +16,33 @@ class TaskApiService {
       final List todos = data["todos"];
 
       final random = Random();
-      final priorities = ["niski", "średni", "wysoki"];
+
+      final priorities = [
+        "niski",
+        "średni",
+        "wysoki",
+      ];
+
       final deadlines = [
         "dziś",
         "jutro",
-        "pojutrze",
-        "za 3 dni",
         "za tydzień",
-        "za 2 tygodnie",
+        "za 2 dni",
       ];
 
       return todos.map((todo) {
-        final priority = priorities[random.nextInt(priorities.length)];
-        final deadline = deadlines[random.nextInt(deadlines.length)];
-
         return Task(
+          id: todo["id"], 
           title: todo["todo"],
-          deadline: deadline,
+          deadline:
+          deadlines[random.nextInt(deadlines.length)],
           done: todo["completed"],
-          priority: priority,
+          priority:
+          priorities[random.nextInt(priorities.length)],
         );
       }).toList();
     } else {
-      throw Exception("Błąd pobierania danych: ${response.statusCode}");
+      throw Exception("Błąd API");
     }
   }
 }
