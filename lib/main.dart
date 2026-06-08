@@ -5,12 +5,15 @@ import 'task_repository.dart';
 import 'task_api_service.dart';
 import 'task_local_database.dart';
 import 'task_sync_service.dart';
+import 'notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Hive.initFlutter();
   await Hive.openBox("tasks");
+
+  await NotificationService.init();
 
   runApp(const MyApp());
 }
@@ -186,21 +189,29 @@ class _MyMainHomeScreenState extends State<MyMainHomeScreen> {
                         child: TaskCard(
                           task: task,
                           onChanged: (value) async {
+                            final isDone = value ?? false;
+                            final wasDone = task.done;
+
                             final updatedTask = Task(
                               id: task.id,
                               title: task.title,
                               deadline: task.deadline,
-                              done: value ?? false,
+                              done: isDone,
                               priority: task.priority,
                             );
 
-                            await TaskLocalDatabase
-                                .updateTask(updatedTask);
+                            await TaskLocalDatabase.updateTask(updatedTask);
+
+                            if (!wasDone && isDone) {
+                              await NotificationService
+                                  .showTaskDoneNotification(task.title);
+                            }
 
                             setState(() {
                               _tasksFuture = loadTasks();
                             });
                           },
+
                           onTap: () async {
                             final updatedTask =
                             await Navigator.push(
